@@ -112,6 +112,12 @@ class CameraController(
     /** Invoked when a session could not be configured even after fallbacks. */
     var onSessionError: ((String) -> Unit)? = null
 
+    /** Invoked (camera handler thread) when the repeating preview request is running. */
+    var onPreviewStarted: (() -> Unit)? = null
+
+    /** Bisection knob: 0 = AE/exposure only, 1 = +fps/stab/regions, 2 = full profiles. */
+    @Volatile var safeLevel = 0
+
     /** On-screen debug log sink (thread-safe enough for our purposes). */
     var debugLog: ((String) -> Unit)? = null
 
@@ -374,10 +380,13 @@ class CameraController(
     }
 
     /** Build the capture request from current state. Every setting is fail-soft:
-     *  a rejected set() must never kill the preview (black screen). */
+     *  a rejected set() must never kill the preview (black screen).
+     *  Exposure/focus/zoom are ALWAYS applied (essential manual controls);
+     *  fps/stab/regions need safeLevel >= 1; profile tonemap/color need >= 2. */
     private fun applyState(b: CaptureRequest.Builder) {
         val cap = capabilities ?: return
         val p = Profiles.ALL[state.profileIdx]
+        val lvl = safeLevel
 
         // exposure
         try {
@@ -389,7 +398,7 @@ class CameraController(
                 b.set(CaptureRequest.SENSOR_EXPOSURE_TIME,
                     state.shutterNs.coerceIn(cap.expoMinNs, cap.expoMaxNs))
             }
-            aeRegion?.let { b.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(it)) }
+            if (lvl >= 1) aeRegion?.let { b.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(it)) }
         } catch (e: Exception) { d("set FAILED ae: ${e.message}") }
 
         // focus
@@ -431,25 +440,27 @@ class CameraController(
         } catch (e: Exception) { d("set FAILED wb: ${e.message}") }
 
         // profile: tonemap + saturation (some devices reject custom curves -> skip on error)
-        try {
-            b.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
-            b.set(CaptureRequest.TONEMAP_CURVE,
-                android.hardware.camera2.params.TonemapCurve(p.red, p.green, p.blue))
-        } catch (e: Exception) { d("set FAILED tonemap: ${e.message}") }
-        try {
-            b.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
-            b.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, Profiles.saturationMatrix(p.saturation))
-        } catch (e: Exception) { d("set FAILED transform: ${e.message}") }
+        if (lvl >= 2) {
+            try {
+                b.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
+                b.set(CaptureRequest.TONEMAP_CURVE,
+                    android.hardware.camera2.params.TonemapCurve(p.red, p.green, p.blue))
+            } catch (e: Exception) { d("set FAILED tonemap: ${e.message}") }
+            try {
+                b.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
+                b.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, Profiles.saturationMatrix(p.saturation))
+            } catch (e: Exception) { d("set FAILED transform: ${e.message}") }
+        }
 
         // fps
-        if (cap.fpsSupported.contains(state.fps)) {
+        if (lvl >= 1 && cap.fpsSupported.contains(state.fps)) {
             try { b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(state.fps, state.fps)) }
             catch (e: Exception) { d("set FAILED fps: ${e.message}") }
         }
 
         // stabilization — only for <=1080p VIDEO (EIS@4K is rejected by many devices and
         // historically caused the BLACK SCREEN bug)
-        if (cap.stabilizationSupported && state.stabilization && videoHeight <= 1080) {
+        if (lvl >= 1 && cap.stabilizationSupported && state.stabilization && videoHeight <= 1080) {
             try {
                 b.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
                     CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)
@@ -491,7 +502,8 @@ class CameraController(
             applyState(b)
             previewBuilder = b
             s.setRepeatingRequest(b.build(), null, handler)
-            d("repeating STARTED (${if (recordSurface == null) "preview" else "record"} template)")
+            d("repeating STARTED (${if (recordSurface == null) "preview" else "record"} template, safe=$safeLevel)")
+            onPreviewStarted?.invoke()
         } catch (e: Exception) {
             d("repeating FAILED: ${e.message}")
             Log.e(TAG, "startRepeating", e)

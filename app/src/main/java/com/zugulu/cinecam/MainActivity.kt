@@ -153,9 +153,16 @@ class MainActivity : Activity(), SensorEventListener {
         renderer = PreviewRenderer(this)
         controller = CameraController(this) { st -> onStateChanged(st) }
         controller.onCapabilities = {
+            runOnUiThread { syncAllRanges() }
+        }
+        // sensor self-test must run AFTER the repeating request actually starts
+        // (onCapabilities fires before the session exists — state changes were no-ops!)
+        controller.onPreviewStarted = {
             runOnUiThread {
-                syncAllRanges()
-                sensorSelfTest()
+                if (!sensorTestRan) {
+                    sensorTestRan = true
+                    sensorSelfTest()
+                }
             }
         }
         controller.onSessionError = { msg ->
@@ -234,6 +241,8 @@ class MainActivity : Activity(), SensorEventListener {
     }
 
     private var sensorTestRunning = false
+    private var sensorTestRan = false
+    private var lastTest = ""
 
     /** Force max ISO + 1/10s shutter for 8 seconds — a live sensor always shows
      *  something then, even in a dark room. Results go to the STATUS LABEL so they
@@ -260,7 +269,9 @@ class MainActivity : Activity(), SensorEventListener {
         main.postDelayed({
             sensorTestRunning = false
             controller.setState { s -> s.aeAuto = true }
-            appendDebug("SENSOR TEST done — last=${renderer.lastCenterRgb.joinToString()}")
+            val px = renderer.lastCenterRgb
+            lastTest = "test=${px[0]},${px[1]},${px[2]}"
+            appendDebug("SENSOR TEST done — $lastTest (iso=${cap.isoMax},1/10s)")
             updateStatusLabel()
         }, 8000)
     }
@@ -368,6 +379,7 @@ class MainActivity : Activity(), SensorEventListener {
             (size?.height ?: 0) <= 1080) " STAB" else ""
         val hdr = if (hdrOn && controller.hdrOn) " HDR" else ""
         statusLabel.text = "$resTxt ${st.fps} • $prof • $enc ${mbps}M$stab$hdr"
+        if (lastTest.isNotEmpty()) statusLabel.text = "${statusLabel.text} | $lastTest"
     }
 
     // ---------------- UI wiring ----------------
@@ -445,6 +457,19 @@ class MainActivity : Activity(), SensorEventListener {
         }
         findViewById<TextView>(R.id.testBtn).setOnClickListener {
             sensorSelfTest()
+        }
+        findViewById<TextView>(R.id.safeBtn).setOnClickListener {
+            controller.safeLevel = (controller.safeLevel + 1) % 3
+            controller.update()
+            val lvl = controller.safeLevel
+            findViewById<TextView>(R.id.safeBtn).text =
+                when (lvl) { 0 -> "SAFE0" ; 1 -> "SAFE1"; else -> "SAFE2" }
+            setAssistBtn(R.id.safeBtn, lvl != 0)
+            appendDebug("safeLevel=$lvl " + when (lvl) {
+                0 -> "(AE only)"
+                1 -> "(+fps/stab)"
+                else -> "(full profiles)"
+            })
         }
         findViewById<TextView>(R.id.fcBtn).setOnClickListener {
             falseColorOn = !falseColorOn
