@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <FrameLayout
+        android:id="@+id/previewContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center">
+
+        <com.zugulu.cinecam.AspectGLSurfaceView
+            android:id="@+id/glPreview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="center" />
+
+        <com.zugulu.cinecam.GridOverlay
+            android:id="@+id/gridOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <com.zugulu.cinecam.ReticleView
+            android:id="@+id/reticleView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <!-- top panel -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="6dp"
+        android:gravity="top"
+        android:background="#66000000">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <HorizontalScrollView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/profileRow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
+
+            <TextView
+                android:id="@+id/resChip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="4K"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                android:padding="7dp"
+                android:background="@drawable/chip_bg" />
+
+            <TextView
+                android:id="@+id/fpsChip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="30"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                android:padding="7dp"
+                android:background="@drawable/chip_bg" />
+
+            <TextView
+                android:id="@+id/bitrateChip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="HIGH"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                android:padding="7dp"
+                android:background="@drawable/chip_bg" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="end">
+
+            <com.zugulu.cinecam.LevelView
+                android:id="@+id/levelView"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:visibility="gone" />
+
+            <com.zugulu.cinecam.HistogramView
+                android:id="@+id/histogramView"
+                android:layout_width="96dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="6dp"
+                android:visibility="gone" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- bottom panel -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="bottom"
+        android:layout_gravity="bottom"
+        android:background="#88000000"
+        android:padding="6dp">
+
+        <TextView
+            android:id="@+id/debugLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="v2.0"
+            android:textColor="#80FF8080"
+            android:textSize="8sp"
+            android:fontFamily="monospace"
+            android:maxLines="8"
+            android:background="#22000000" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/statusLabel"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="—"
+                android:textColor="#FFC84D"
+                android:textSize="10sp" />
+
+            <TextView
+                android:id="@+id/timecodeLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="00:00:00:00"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:fontFamily="monospace" />
+
+            <com.zugulu.cinecam.AudioMeterView
+                android:id="@+id/audioMeter"
+                android:layout_width="60dp"
+                android:layout_height="12dp"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <TextView android:id="@+id/gridBtn" style="@style/AssistBtn" android:text="GRID" />
+            <TextView android:id="@+id/peakBtn" style="@style/AssistBtn" android:text="PEAK" />
+            <TextView android:id="@+id/zebraBtn" style="@style/AssistBtn" android:text="ZEBRA" />
+            <TextView android:id="@+id/histBtn" style="@style/AssistBtn" android:text="HIST" />
+            <TextView android:id="@+id/lvlBtn" style="@style/AssistBtn" android:text="LVL" />
+            <TextView android:id="@+id/stabBtn" style="@style/AssistBtn" android:text="STAB" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <TextView android:id="@+id/fcBtn" style="@style/AssistBtn" android:text="F. COLOR" />
+            <TextView android:id="@+id/lutBtn" style="@style/AssistBtn" android:text="LUT" />
+            <TextView android:id="@+id/retBtn" style="@style/AssistBtn" android:text="RET" />
+            <TextView android:id="@+id/hdrBtn" style="@style/AssistBtn" android:text="HDR" />
+            <TextView android:id="@+id/testBtn" style="@style/AssistBtn" android:text="TEST" />
+            <TextView android:id="@+id/camBtn" style="@style/AssistBtn" android:text="CAM" />
+            <TextView android:id="@+id/manualBtn" style="@style/AssistBtn" android:text="MANUAL" />
+        </LinearLayout>
+
+        <!-- manual sliders -->
+        <LinearLayout
+            android:id="@+id/manualPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <LinearLayout style="@style/SliderRow">
+                <TextView android:id="@+id/isoAuto" style="@style/AutoBtn" android:text="A" />
+                <TextView android:id="@+id/isoLabel" style="@style/SliderLabel" android:text="ISO 100" />
+                <SeekBar android:id="@+id/isoSeek" style="@style/SliderSeek" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/SliderRow">
+                <TextView android:id="@+id/shutAuto" style="@style/AutoBtn" android:text="A" />
+                <TextView android:id="@+id/shutLabel" style="@style/SliderLabel" android:text="1/50" />
+                <SeekBar android:id="@+id/shutSeek" style="@style/SliderSeek" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/SliderRow">
+                <TextView android:id="@+id/wbAuto" style="@style/AutoBtn" android:text="A" />
+                <TextView android:id="@+id/wbLabel" style="@style/SliderLabel" android:text="5600K" />
+                <SeekBar android:id="@+id/wbSeek" style="@style/SliderSeek" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/SliderRow">
+                <TextView android:id="@+id/focusAuto" style="@style/AutoBtn" android:text="A" />
+                <TextView android:id="@+id/focusLabel" style="@style/SliderLabel" android:text="∞" />
+                <SeekBar android:id="@+id/focusSeek" style="@style/SliderSeek" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/SliderRow">
+                <TextView android:id="@+id/zoomLabel" style="@style/SliderLabel" android:text="1.0x" />
+                <SeekBar android:id="@+id/zoomSeek" style="@style/SliderSeek" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="6dp">
+
+            <TextView
+                android:id="@+id/recBtn"
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:layout_gravity="center"
+                android:text="●"
+                android:textSize="34sp"
+                android:textColor="#FF3B30"
+                android:gravity="center"
+                android:background="@drawable/rec_circle_bg" />
+        </FrameLayout>
+    </LinearLayout>
+</FrameLayout>

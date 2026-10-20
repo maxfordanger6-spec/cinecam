@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CineCam Pro</string>
+
+    <style name="AssistBtn">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textSize">10sp</item>
+        <item name="android:textColor">#99FFFFFF</item>
+        <item name="android:padding">6dp</item>
+        <item name="android:background">@drawable/chip_bg</item>
+        <item name="android:layout_margin">2dp</item>
+    </style>
+
+    <style name="SliderRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:gravity">center_vertical</item>
+    </style>
+
+    <style name="SliderLabel">
+        <item name="android:layout_width">72dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textSize">10sp</item>
+        <item name="android:textColor">#E6FFFFFF</item>
+        <item name="android:fontFamily">monospace</item>
+    </style>
+
+    <style name="SliderSeek">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:minHeight">18dp</item>
+    </style>
+
+    <style name="AutoBtn">
+        <item name="android:layout_width">24dp</item>
+        <item name="android:layout_height">24dp</item>
+        <item name="android:textSize">10sp</item>
+        <item name="android:textColor">#E6FFFFFF</item>
+        <item name="android:gravity">center</item>
+        <item name="android:background">@drawable/auto_btn_bg</item>
+    </style>
+</resources>
