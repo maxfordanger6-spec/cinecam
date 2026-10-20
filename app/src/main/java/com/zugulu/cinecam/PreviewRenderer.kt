@@ -34,7 +34,9 @@ class PreviewRenderer(
     @Volatile var zebraLevel = 0.95f
     @Volatile var rotationDegrees = 0f  // total preview rotation (sensor - device)
     @Volatile var rotSign = 1f          // flip to -1f if preview appears rotated the wrong way
-    @Volatile var rawMode = true        // DIAGNOSTIC: raw sampling (no transform)
+    @Volatile var rotOffset = 0f        // manual ORI adjust (0/90/180/270)
+    @Volatile var flipMode = true       // vertical flip before rotation (buffer origin)
+    @Volatile var rawMode = false       // DIAGNOSTIC: raw sampling (no transform)
 
     /** Latest center-pixel average from the GL framebuffer (for diagnostics). */
     @Volatile var lastCenterRgb = intArrayOf(0, 0, 0)
@@ -65,6 +67,7 @@ class PreviewRenderer(
     private var uSTMatrix = 0
     private var uRot = 0
     private var uRaw = 0
+    private var uFlip = 0
     private var uPeak = 0
     private var uZebra = 0
     private var uFalseColor = 0
@@ -85,6 +88,7 @@ class PreviewRenderer(
         uniform mat4 uSTMatrix;
         uniform float uRot;
         uniform int uRaw;
+        uniform int uFlip;
         attribute vec4 aPosition;
         attribute vec2 aTexCoord;
         varying vec2 vTexCoord;
@@ -93,7 +97,7 @@ class PreviewRenderer(
                 vTexCoord = aTexCoord;                 // DIAGNOSTIC: raw sampling
             } else {
                 vec2 uv = aTexCoord;
-                uv.y = 1.0 - uv.y;                     // GL buffer origin fix (sensor top = v0)
+                if (uFlip == 1) uv.y = 1.0 - uv.y;     // GL buffer origin fix (sensor top = v0)
                 float rad = radians(uRot);
                 float c = cos(rad), s = sin(rad);
                 uv = mat2(c, -s, s, c) * (uv - 0.5) + 0.5;
@@ -222,6 +226,7 @@ class PreviewRenderer(
         uSTMatrix = GLES20.glGetUniformLocation(program, "uSTMatrix")
         uRot = GLES20.glGetUniformLocation(program, "uRot")
         uRaw = GLES20.glGetUniformLocation(program, "uRaw")
+        uFlip = GLES20.glGetUniformLocation(program, "uFlip")
         uPeak = GLES20.glGetUniformLocation(program, "uPeak")
         uZebra = GLES20.glGetUniformLocation(program, "uZebra")
         uFalseColor = GLES20.glGetUniformLocation(program, "uFalseColor")
@@ -304,7 +309,7 @@ class PreviewRenderer(
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)    // GL-rendering from pure-black dead GL
         GLES20.glUseProgram(program)
 
-        val rot = rotSign * rotationDegrees % 360f
+        val rot = (rotSign * (rotationDegrees + rotOffset)) % 360f
 
         vb.position(0)
         GLES20.glEnableVertexAttribArray(aPos)
@@ -316,6 +321,7 @@ class PreviewRenderer(
         GLES20.glUniformMatrix4fv(uSTMatrix, 1, false, textureTransform, 0)
         GLES20.glUniform1f(uRot, rot)
         GLES20.glUniform1i(uRaw, if (rawMode) 1 else 0)
+        GLES20.glUniform1i(uFlip, if (flipMode) 1 else 0)
         GLES20.glUniform1i(uPeak, if (peakOn) 1 else 0)
         GLES20.glUniform1i(uZebra, if (zebraOn) 1 else 0)
         GLES20.glUniform1i(uFalseColor, if (falseColorOn) 1 else 0)

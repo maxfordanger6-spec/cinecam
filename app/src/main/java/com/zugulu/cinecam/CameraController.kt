@@ -115,7 +115,7 @@ class CameraController(
     /** Invoked (camera handler thread) when the repeating preview request is running. */
     var onPreviewStarted: (() -> Unit)? = null
 
-    /** Bisection knob: 0 = AE/exposure only, 1 = +fps/stab/regions, 2 = full profiles. */
+    /** Bisection knob: 0 = AE/exposure only, 1 = +fps/regions, 2 = +stab, 3 = full profiles. */
     @Volatile var safeLevel = 0
 
     /** On-screen debug log sink (thread-safe enough for our purposes). */
@@ -440,7 +440,7 @@ class CameraController(
         } catch (e: Exception) { d("set FAILED wb: ${e.message}") }
 
         // profile: tonemap + saturation (some devices reject custom curves -> skip on error)
-        if (lvl >= 2) {
+        if (lvl >= 3) {
             try {
                 b.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
                 b.set(CaptureRequest.TONEMAP_CURVE,
@@ -460,11 +460,13 @@ class CameraController(
 
         // stabilization — only for <=1080p VIDEO (EIS@4K is rejected by many devices and
         // historically caused the BLACK SCREEN bug)
-        if (lvl >= 1 && cap.stabilizationSupported && state.stabilization && videoHeight <= 1080) {
+        if (lvl >= 2 && cap.stabilizationSupported && state.stabilization && videoHeight <= 1080) {
             try {
                 b.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
                     CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)
             } catch (e: Exception) { d("set FAILED stab: ${e.message}") }
+        } else if (lvl < 2) {
+            // leave stabilization untouched at low safe levels
         } else {
             try { b.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
                 CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF) }

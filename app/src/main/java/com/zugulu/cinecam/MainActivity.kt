@@ -104,6 +104,7 @@ class MainActivity : Activity(), SensorEventListener {
     private var retOn = false
     private var hdrOn = false
     private var lutIdx = 0   // 0=off, 1=profile LUT, 2=T&O, 3=NOIR, 4=PASTL
+    private var oriIdx = 0   // 0..7 rotation variants, 8 = raw diagnostic
 
     private lateinit var reticleView: ReticleView
 
@@ -196,6 +197,9 @@ class MainActivity : Activity(), SensorEventListener {
         wireChips()
         wireGestures()
         wireRecording()
+
+        oriIdx = getSharedPreferences("cinecam", MODE_PRIVATE).getInt("oriIdx", 0)
+        applyOri()
 
         ticker = object : Runnable {
             override fun run() {
@@ -459,17 +463,21 @@ class MainActivity : Activity(), SensorEventListener {
             sensorSelfTest()
         }
         findViewById<TextView>(R.id.safeBtn).setOnClickListener {
-            controller.safeLevel = (controller.safeLevel + 1) % 3
+            controller.safeLevel = (controller.safeLevel + 1) % 4
             controller.update()
             val lvl = controller.safeLevel
-            findViewById<TextView>(R.id.safeBtn).text =
-                when (lvl) { 0 -> "SAFE0" ; 1 -> "SAFE1"; else -> "SAFE2" }
+            findViewById<TextView>(R.id.safeBtn).text = "SAFE$lvl"
             setAssistBtn(R.id.safeBtn, lvl != 0)
             appendDebug("safeLevel=$lvl " + when (lvl) {
                 0 -> "(AE only)"
-                1 -> "(+fps/stab)"
+                1 -> "(+fps)"
+                2 -> "(+stab)"
                 else -> "(full profiles)"
             })
+        }
+        findViewById<TextView>(R.id.oriBtn).setOnClickListener {
+            oriIdx = (oriIdx + 1) % 9
+            applyOri()
         }
         findViewById<TextView>(R.id.fcBtn).setOnClickListener {
             falseColorOn = !falseColorOn
@@ -500,6 +508,20 @@ class MainActivity : Activity(), SensorEventListener {
                     true)
             }
         }
+    }
+
+    private fun applyOri() {
+        // 0..7: {flip} x {rot 0/90/180/270}, 8 = RAW diagnostic
+        val f = arrayOf(true, false, true, false, true, false, true, false, true)[oriIdx]
+        val r = arrayOf(0f, 0f, 90f, 90f, 180f, 180f, 270f, 270f, 0f)[oriIdx]
+        renderer.rawMode = oriIdx == 8
+        renderer.flipMode = f
+        renderer.rotOffset = r
+        findViewById<TextView>(R.id.oriBtn).text = "ORI${oriIdx + 1}"
+        setAssistBtn(R.id.oriBtn, oriIdx != 0)
+        appendDebug("ori=${oriIdx + 1} flip=$f rot=$r${if (oriIdx == 8) " RAW" else ""}")
+        getSharedPreferences("cinecam", MODE_PRIVATE).edit()
+            .putInt("oriIdx", oriIdx).apply()
     }
 
     private fun applyLut() {

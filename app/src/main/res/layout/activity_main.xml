@@ -122,7 +122,7 @@
             android:id="@+id/debugLabel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="v2.1"
+            android:text="v2.2"
             android:textColor="#80FF8080"
             android:textSize="8sp"
             android:fontFamily="monospace"
@@ -185,6 +185,7 @@
             <TextView android:id="@+id/retBtn" style="@style/AssistBtn" android:text="RET" />
             <TextView android:id="@+id/hdrBtn" style="@style/AssistBtn" android:text="HDR" />
             <TextView android:id="@+id/safeBtn" style="@style/AssistBtn" android:text="SAFE0" />
+            <TextView android:id="@+id/oriBtn" style="@style/AssistBtn" android:text="ORI1" />
             <TextView android:id="@+id/testBtn" style="@style/AssistBtn" android:text="TEST" />
             <TextView android:id="@+id/camBtn" style="@style/AssistBtn" android:text="CAM" />
             <TextView android:id="@+id/manualBtn" style="@style/AssistBtn" android:text="MANUAL" />
