@@ -198,7 +198,7 @@ class MainActivity : Activity(), SensorEventListener {
         wireGestures()
         wireRecording()
 
-        oriIdx = getSharedPreferences("cinecam", MODE_PRIVATE).getInt("oriIdx", 0)
+        oriIdx = getSharedPreferences("cinecam", MODE_PRIVATE).getInt("oriIdx_v23", 0)
         applyOri()
 
         ticker = object : Runnable {
@@ -511,8 +511,10 @@ class MainActivity : Activity(), SensorEventListener {
     }
 
     private fun applyOri() {
-        // 0..7: {flip} x {rot 0/90/180/270}, 8 = RAW diagnostic
-        val f = arrayOf(true, false, true, false, true, false, true, false, true)[oriIdx]
+        // idx0 = auto-correct (pure rotation, no flip) — verified math:
+        // scene top -> screen top, scene right -> screen right (back camera)
+        // variants 1..7 cover deviant HALs, 8 = RAW diagnostic
+        val f = arrayOf(false, true, false, true, false, true, false, true, false)[oriIdx]
         val r = arrayOf(0f, 0f, 90f, 90f, 180f, 180f, 270f, 270f, 0f)[oriIdx]
         renderer.rawMode = oriIdx == 8
         renderer.flipMode = f
@@ -521,7 +523,7 @@ class MainActivity : Activity(), SensorEventListener {
         setAssistBtn(R.id.oriBtn, oriIdx != 0)
         appendDebug("ori=${oriIdx + 1} flip=$f rot=$r${if (oriIdx == 8) " RAW" else ""}")
         getSharedPreferences("cinecam", MODE_PRIVATE).edit()
-            .putInt("oriIdx", oriIdx).apply()
+            .putInt("oriIdx_v23", oriIdx).apply()
     }
 
     private fun applyLut() {

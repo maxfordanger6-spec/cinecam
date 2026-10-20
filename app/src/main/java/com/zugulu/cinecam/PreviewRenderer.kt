@@ -35,7 +35,7 @@ class PreviewRenderer(
     @Volatile var rotationDegrees = 0f  // total preview rotation (sensor - device)
     @Volatile var rotSign = 1f          // flip to -1f if preview appears rotated the wrong way
     @Volatile var rotOffset = 0f        // manual ORI adjust (0/90/180/270)
-    @Volatile var flipMode = true       // vertical flip before rotation (buffer origin)
+    @Volatile var flipMode = false      // extra vertical flip (ONLY for deviant HALs)
     @Volatile var rawMode = false       // DIAGNOSTIC: raw sampling (no transform)
 
     /** Latest center-pixel average from the GL framebuffer (for diagnostics). */
