@@ -94,14 +94,15 @@ class PreviewRenderer(
         -1f,  1f, 1f, 0f,   // top-left    : scene-up   + scene-left
          1f,  1f, 1f, 1f    // top-right   : scene-up   + scene-right
     )
-    // PORTRAIT (9:16 buffer): the HAL delivers the scene already upright —
-    // buffer top = scene-up, buffer left = scene-left (standard, non-mirrored).
+    // PORTRAIT (9:16 buffer): the HAL delivers the scene rotated 180° relative to
+    // the buffer layout on MTK — buffer BOTTOM (v=1) = scene-up, buffer top (v=0)
+    // = scene-down. Verified via in-scene reference (game HUD bars).
     private val quadPortrait = floatArrayOf(
         //  x,   y,   u,   v
-        -1f, -1f, 0f, 1f,   // bottom-left : scene-left  + scene-down
-         1f, -1f, 1f, 1f,   // bottom-right: scene-right + scene-down
-        -1f,  1f, 0f, 0f,   // top-left    : scene-left  + scene-up
-         1f,  1f, 1f, 0f    // top-right   : scene-right + scene-up
+        -1f, -1f, 0f, 0f,   // bottom-left : scene-left  + scene-down
+         1f, -1f, 1f, 0f,   // bottom-right: scene-right + scene-down
+        -1f,  1f, 0f, 1f,   // top-left    : scene-left  + scene-up
+         1f,  1f, 1f, 1f    // top-right   : scene-right + scene-up
     )
 
     private val VERT = """
