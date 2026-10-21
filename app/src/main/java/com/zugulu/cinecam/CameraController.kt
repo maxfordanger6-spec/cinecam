@@ -250,7 +250,13 @@ class CameraController(
         // MediaRecorder-class size — some devices (MIUI) advertise 4096x2304 for the
         // encoder but silently deliver nothing to a SurfaceTexture of that size (BLACK
         // preview while the whole pipeline looks healthy). Preview: largest 16:9 ≤1080p.
+        // 🚨 Some MTK HALs list ONLY portrait preview sizes (e.g. 720x1280): the camera
+        // then delivers pre-rotated content into a portrait buffer, which breaks the
+        // landscape-based transform math and STRETCHES the image. Normalize every size
+        // to landscape (w >= h) — the HAL accepts the swapped dims for the same mode.
         val texSizes = map.getOutputSizes(SurfaceTexture::class.java).toList()
+            .map { if (it.width < it.height) Size(it.height, it.width) else it }
+            .distinct()
             .sortedWith(compareByDescending<Size> { it.height }.thenByDescending { it.width })
         val tex16_9 = texSizes.filter {
             kotlin.math.abs(it.width.toFloat() / it.height - 16f / 9f) < 0.02f
@@ -260,6 +266,7 @@ class CameraController(
             ?: texSizes.minByOrNull { it.height }
             ?: Size(1920, 1080)
         previewSize = previewPick
+        d("preview pick=$previewPick (normalized landscape)")
 
         val fpsRanges = ch.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: emptyArray()
         val fpsSet = mutableSetOf<Int>()
