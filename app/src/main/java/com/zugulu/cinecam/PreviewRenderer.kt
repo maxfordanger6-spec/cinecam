@@ -85,13 +85,14 @@ class PreviewRenderer(
     // and correctly handed in the view.
     //
     // LANDSCAPE (16:9 buffer): the raw sensor buffer is rotated 90° inside the
-    // landscape frame (scene-up at u=0, scene-left at v=0, scene-right at v=1):
+    // landscape frame — scene-up at u=1, scene-down at u=0, scene-left at v=0,
+    // scene-right at v=1 (verified: no mirror, top at top):
     private val quadLandscape = floatArrayOf(
         //  x,   y,   u,   v
-        -1f, -1f, 1f, 0f,   // bottom-left : scene-down + scene-left
-         1f, -1f, 1f, 1f,   // bottom-right: scene-down + scene-right
-        -1f,  1f, 0f, 0f,   // top-left    : scene-up   + scene-left
-         1f,  1f, 0f, 1f    // top-right   : scene-up   + scene-right
+        -1f, -1f, 0f, 0f,   // bottom-left : scene-down + scene-left
+         1f, -1f, 0f, 1f,   // bottom-right: scene-down + scene-right
+        -1f,  1f, 1f, 0f,   // top-left    : scene-up   + scene-left
+         1f,  1f, 1f, 1f    // top-right   : scene-up   + scene-right
     )
     // PORTRAIT (9:16 buffer): the HAL delivers the scene already upright —
     // buffer top = scene-up, buffer left = scene-left (standard, non-mirrored).
