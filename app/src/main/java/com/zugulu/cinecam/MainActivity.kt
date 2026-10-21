@@ -508,6 +508,11 @@ class MainActivity : Activity(), SensorEventListener {
                     true)
             }
         }
+        // long-press the status line to toggle the debug console (hidden by default)
+        statusLabel.setOnLongClickListener {
+            debugLabel.visibility = if (debugLabel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            true
+        }
     }
 
     private fun applyLut() {

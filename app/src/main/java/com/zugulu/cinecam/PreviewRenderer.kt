@@ -84,15 +84,14 @@ class PreviewRenderer(
     // Two static quads — zero rotation math, the camera content is always upright
     // and correctly handed in the view.
     //
-    // LANDSCAPE (16:9 buffer): the raw sensor buffer is rotated 90° inside the
-    // landscape frame — scene-up at u=1, scene-down at u=0, scene-left at v=0,
-    // scene-right at v=1 (verified: no mirror, top at top):
+    // LANDSCAPE (16:9 buffer): scene-up at u=1, scene-down at u=0 (verified v2.12),
+    // scene-left at v=1, scene-right at v=0 (verified v2.14 — TV text no longer mirrored):
     private val quadLandscape = floatArrayOf(
         //  x,   y,   u,   v
-        -1f, -1f, 0f, 0f,   // bottom-left : scene-down + scene-left
-         1f, -1f, 0f, 1f,   // bottom-right: scene-down + scene-right
-        -1f,  1f, 1f, 0f,   // top-left    : scene-up   + scene-left
-         1f,  1f, 1f, 1f    // top-right   : scene-up   + scene-right
+        -1f, -1f, 0f, 1f,   // bottom-left : scene-down + scene-left
+         1f, -1f, 0f, 0f,   // bottom-right: scene-down + scene-right
+        -1f,  1f, 1f, 1f,   // top-left    : scene-up   + scene-left
+         1f,  1f, 1f, 0f    // top-right   : scene-up   + scene-right
     )
     // PORTRAIT (9:16 buffer): the HAL delivers the scene rotated 180° relative to
     // the buffer layout on MTK — buffer BOTTOM (v=1) = scene-up, buffer top (v=0)
