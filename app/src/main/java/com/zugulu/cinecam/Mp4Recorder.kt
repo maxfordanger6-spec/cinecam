@@ -74,7 +74,9 @@ class Mp4Recorder(private val context: Context) {
     private var outputUri: Uri? = null
     private var outputPath: String? = null
     private var fps = 30
+    private var stopRequested = false
     private var syntheticPtsUs = 0L
+    private var videoBaseUs = -1L
     private var sawEndOfStream = false
 
     var maxAmplitude: Int = 0
@@ -96,6 +98,7 @@ class Mp4Recorder(private val context: Context) {
                 orientationHint: Int, onDebug: (String) -> Unit): Surface {
         this.fps = fps
         syntheticPtsUs = 0L
+        videoBaseUs = -1L
         sawEndOfStream = false
         muxerStarted = false
         videoTrack = -1
@@ -292,7 +295,12 @@ class Mp4Recorder(private val context: Context) {
                         pts = syntheticPtsUs
                         syntheticPtsUs += 1_000_000L / fps
                     }
-                    info.presentationTimeUs = pts
+                    // 🚨 The camera's frame timestamps are boot-relative (huge values,
+                    // e.g. 170e9 µs) while the audio track starts at 0 — writing raw
+                    // PTS freezes playback at the start and desyncs A/V. Offset by the
+                    // first video frame so both tracks share the same timebase.
+                    if (videoBaseUs < 0) videoBaseUs = pts
+                    info.presentationTimeUs = pts - videoBaseUs
                     muxer!!.writeSampleData(videoTrack, buf, info)
                 }
                 codec.releaseOutputBuffer(idx, false)

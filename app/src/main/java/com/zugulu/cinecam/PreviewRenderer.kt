@@ -347,8 +347,13 @@ class PreviewRenderer(
         GLES20.glDisableVertexAttribArray(aUV)
 
         // ---- encoder pass: same geometry, pre-rotated frames into MediaCodec ----
+        // only feed GENUINELY new camera frames (the display loop runs at 60fps while
+        // the camera produces 30fps — duplicates would double the frame rate)
         manageEncoderEgl()
-        if (encEglSurface != null) drawEncoderFrame(frameTs)
+        if (encEglSurface != null && frameTs != lastEncTs) {
+            lastEncTs = frameTs
+            drawEncoderFrame(frameTs)
+        }
 
         // DIAGNOSTIC: report whether frames actually reach the SurfaceTexture
         frameCount++
@@ -400,6 +405,7 @@ class PreviewRenderer(
     private var encH = 0
     @Volatile private var pendingEncoder: Surface? = null
     @Volatile private var encDetachRequested = false
+    private var lastEncTs = 0L
 
     /** Attach a MediaCodec input surface. Called from the UI thread. */
     fun attachEncoder(surface: Surface, w: Int, h: Int) {
