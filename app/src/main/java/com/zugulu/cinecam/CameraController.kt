@@ -82,6 +82,28 @@ class CameraController(
     private val cameras = mutableListOf<String>()
 
     var previewSize: Size = Size(1920, 1080)
+    private var landscapePreview: Size = Size(1920, 1080)
+    private var portraitPreview: Size = Size(1080, 1920)
+
+    /** Full-screen vertical mode: portrait preview buffer + 9:16 view. */
+    @Volatile var portraitMode = false
+
+    /** Switch preview orientation (portrait/landscape) — rebuilds the session. */
+    fun setOrientation(portrait: Boolean) {
+        if (portrait == portraitMode) return
+        portraitMode = portrait
+        previewSize = if (portrait) portraitPreview else landscapePreview
+        handler.post {
+            try {
+                session?.close()
+                session = null
+                d("session closed for orientation switch (portrait=$portrait)")
+                createPreviewSession()
+            } catch (e: Exception) {
+                d("orientation rebuild failed: ${e.message}")
+            }
+        }
+    }
 
     /** Recording target height (for EIS gating). Set by the UI on res change. */
     @Volatile var videoHeight = 1080
@@ -251,10 +273,11 @@ class CameraController(
         // encoder but silently deliver nothing to a SurfaceTexture of that size (BLACK
         // preview while the whole pipeline looks healthy). Preview: largest 16:9 ≤1080p.
         // 🚨 Some MTK HALs list ONLY portrait preview sizes (e.g. 720x1280): the camera
-        // then delivers pre-rotated content into a portrait buffer, which breaks the
-        // landscape-based transform math and STRETCHES the image. Normalize every size
-        // to landscape (w >= h) — the HAL accepts the swapped dims for the same mode.
-        val texSizes = map.getOutputSizes(SurfaceTexture::class.java).toList()
+        // then delivers pre-rotated content into a portrait buffer. We keep BOTH pools:
+        // landscape sizes (normalized w>=h) for horizontal mode, and the native portrait
+        // sizes for full-screen vertical mode (the HAL rotates the scene upright there).
+        val texSizesRaw = map.getOutputSizes(SurfaceTexture::class.java).toList()
+        val texSizes = texSizesRaw
             .map { if (it.width < it.height) Size(it.height, it.width) else it }
             .distinct()
             .sortedWith(compareByDescending<Size> { it.height }.thenByDescending { it.width })
@@ -262,11 +285,23 @@ class CameraController(
             kotlin.math.abs(it.width.toFloat() / it.height - 16f / 9f) < 0.02f
         }
         val texPool = if (tex16_9.size >= 2) tex16_9 else texSizes
-        val previewPick = texPool.filter { it.height <= 1080 }.firstOrNull()
+        landscapePreview = texPool.filter { it.height <= 1080 }.firstOrNull()
             ?: texSizes.minByOrNull { it.height }
             ?: Size(1920, 1080)
-        previewSize = previewPick
-        d("preview pick=$previewPick (normalized landscape)")
+
+        // portrait pool: native w<h sizes (the HAL rotates into these), 9:16 preferred
+        val portSizes = texSizesRaw.filter { it.width < it.height }
+            .sortedWith(compareByDescending<Size> { it.height }.thenByDescending { it.width })
+        val port16_9 = portSizes.filter {
+            kotlin.math.abs(it.width.toFloat() / it.height - 9f / 16f) < 0.02f
+        }
+        val portPool = if (port16_9.size >= 2) port16_9 else portSizes
+        portraitPreview = portPool.filter { it.width <= 1080 }.firstOrNull()
+            ?: portSizes.firstOrNull()?.let { Size(it.height, it.width) }
+            ?: landscapePreview
+
+        previewSize = if (portraitMode) portraitPreview else landscapePreview
+        d("preview pick=${previewSize} (landscape=$landscapePreview portrait=$portraitPreview)")
 
         val fpsRanges = ch.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: emptyArray()
         val fpsSet = mutableSetOf<Int>()
@@ -294,7 +329,7 @@ class CameraController(
             minFocus, maxZoom, gainsMin, gainsMax, orientation, dynRange, active,
             chosenSizes.take(6), fpsSet, stab, level)
         d("caps: level=$level iso=$isoRange fps=$fpsSet stab=$stab hdr=$dynRange")
-        d("rec size0=${chosenSizes.firstOrNull()} preview=$previewPick")
+        d("rec size0=${chosenSizes.firstOrNull()} preview=$previewSize")
 
         // sanity defaults
         state.iso = ((isoRange.lower + 99) / 100 * 100).coerceAtMost(isoRange.upper)

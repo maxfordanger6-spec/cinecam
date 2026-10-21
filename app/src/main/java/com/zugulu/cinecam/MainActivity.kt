@@ -391,10 +391,11 @@ class MainActivity : Activity(), SensorEventListener {
         for (i in Profiles.ALL.indices) {
             val tv = TextView(this)
             tv.text = Profiles.ALL[i].short
-            tv.textSize = 11f
+            tv.textSize = 10f
             tv.setTextColor(Color.WHITE)
-            tv.setBackgroundColor(Color.argb(30, 255, 255, 255))
-            tv.setPadding(22, 18, 22, 18)
+            tv.letterSpacing = 0.08f
+            tv.setBackgroundColor(Color.argb(24, 255, 255, 255))
+            tv.setPadding(18, 10, 18, 10)
             tv.setOnClickListener {
                 controller.setState { s -> s.profileIdx = i }
                 if (lutIdx == 1) applyLut()   // profile LUT follows the selected profile
@@ -406,8 +407,13 @@ class MainActivity : Activity(), SensorEventListener {
 
     private fun setAssistBtn(viewId: Int, active: Boolean) {
         val tv = findViewById<TextView>(viewId)
-        tv.setTextColor(if (active) Color.rgb(20, 20, 24) else Color.argb(153, 255, 255, 255))
-        tv.setBackgroundColor(if (active) Color.rgb(255, 200, 77) else Color.argb(30, 255, 255, 255))
+        if (active) {
+            tv.setTextColor(Color.rgb(20, 20, 24))
+            tv.setBackgroundColor(Color.rgb(255, 200, 77))
+        } else {
+            tv.setTextColor(Color.argb(179, 255, 255, 255))
+            tv.setBackgroundResource(R.drawable.chip_bg)
+        }
     }
 
     private fun wireAssists() {
@@ -768,10 +774,11 @@ class MainActivity : Activity(), SensorEventListener {
             cap.dynamicRange.contains(DynamicRangeProfiles.HLG10)
 
         var surface: Surface? = null
-        // GL-driven encoding: the renderer draws the DISPLAY geometry (AOSP math) into
-        // the encoder — the file is physically upright everywhere, no metadata hints.
+        // GL-driven encoding: the renderer draws the DISPLAY geometry (static quad)
+        // into the encoder — the file matches the preview, upright in both modes.
         var glDriven = !hdr
-        val encSize = size
+        // portrait mode records a portrait file (swapped dims)
+        val encSize = if (controller.portraitMode) Size(size.height, size.width) else size
         // Path 1: MediaCodec + MediaMuxer (zero-copy, HDR-capable, extreme bitrates)
         try {
             val r = Mp4Recorder(this)
@@ -944,7 +951,8 @@ class MainActivity : Activity(), SensorEventListener {
         sizeIdx = 0
         val sz = cap.sizes.first()
         controller.videoHeight = sz.height
-        glView.setAspect(sz.width, sz.height)
+        glView.setAspect(if (controller.portraitMode) 9 else 16,
+            if (controller.portraitMode) 16 else 9)
         renderer.textureW = controller.previewSize.width
         renderer.textureH = controller.previewSize.height
         resChip.text = resLabel(sz)
@@ -1008,6 +1016,13 @@ class MainActivity : Activity(), SensorEventListener {
             val s = controller.capabilities?.sensorOrientation ?: -1
             appendDebug("rot S=$s D=$deg T=$t")
         }
+        // full-screen vertical: portrait buffer + 9:16 view when the phone is upright
+        val portrait = deg == 0 || deg == 180
+        if (!isRecording) controller.setOrientation(portrait)
+        renderer.portraitMode = controller.portraitMode
+        renderer.textureW = controller.previewSize.width
+        renderer.textureH = controller.previewSize.height
+        glView.setAspect(if (portrait) 9 else 16, if (portrait) 16 else 9)
         updateStatusLabel()
     }
 

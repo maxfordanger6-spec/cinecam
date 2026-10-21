@@ -39,6 +39,7 @@ class PreviewRenderer(
     @Volatile var falseColorOn = false
     @Volatile var lutOn = false
     @Volatile var zebraLevel = 0.95f
+    @Volatile var portraitMode = false   // true: portrait buffer + 9:16 view (full screen)
 
     /** Latest center-pixel average from the GL framebuffer (for diagnostics). */
     @Volatile var lastCenterRgb = intArrayOf(0, 0, 0)
@@ -80,20 +81,26 @@ class PreviewRenderer(
     @Volatile var textureW = 1920
     @Volatile var textureH = 1080
 
-    // STATIC quad: the GL view is a fixed 16:9 monitor — the camera content is
-    // ALWAYS upright inside it, whatever the phone orientation (no rotation math,
-    // no twisting possible). Edge-verified for a 90°-sensor landscape buffer:
-    //   texture u=0 (scene-up)  -> monitor top
-    //   texture u=1 (scene-down)-> monitor bottom
-    //   texture v=0 (scene-right)-> monitor right
-    //   texture v=1 (scene-left)-> monitor left
-    // Every texture edge maps to a monitor edge => no distortion, no mirror.
-    private val quadStatic = floatArrayOf(
+    // Two static quads — zero rotation math, the camera content is always upright
+    // and correctly handed in the view.
+    //
+    // LANDSCAPE (16:9 buffer): the raw sensor buffer is rotated 90° inside the
+    // landscape frame (scene-up at u=0, scene-left at v=0, scene-right at v=1):
+    private val quadLandscape = floatArrayOf(
         //  x,   y,   u,   v
-        -1f, -1f, 1f, 1f,   // bottom-left : scene-down + scene-left
-         1f, -1f, 1f, 0f,   // bottom-right: scene-down + scene-right
-        -1f,  1f, 0f, 1f,   // top-left    : scene-up + scene-left
-         1f,  1f, 0f, 0f    // top-right   : scene-up + scene-right
+        -1f, -1f, 1f, 0f,   // bottom-left : scene-down + scene-left
+         1f, -1f, 1f, 1f,   // bottom-right: scene-down + scene-right
+        -1f,  1f, 0f, 0f,   // top-left    : scene-up   + scene-left
+         1f,  1f, 0f, 1f    // top-right   : scene-up   + scene-right
+    )
+    // PORTRAIT (9:16 buffer): the HAL delivers the scene already upright —
+    // buffer top = scene-up, buffer left = scene-left (standard, non-mirrored).
+    private val quadPortrait = floatArrayOf(
+        //  x,   y,   u,   v
+        -1f, -1f, 0f, 1f,   // bottom-left : scene-left  + scene-down
+         1f, -1f, 1f, 1f,   // bottom-right: scene-right + scene-down
+        -1f,  1f, 0f, 0f,   // top-left    : scene-left  + scene-up
+         1f,  1f, 1f, 0f    // top-right   : scene-right + scene-up
     )
 
     private val VERT = """
@@ -307,9 +314,10 @@ class PreviewRenderer(
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)    // GL-rendering from pure-black dead GL
         GLES20.glUseProgram(program)
 
-        // static upright mapping (see quadStatic) — no rotation math at all
+        // static upright mapping (see quadLandscape/quadPortrait) — no rotation math
+        val q = if (portraitMode) quadPortrait else quadLandscape
         vb.position(0)
-        vb.put(quadStatic)
+        vb.put(q)
         vb.position(0)
         GLES20.glEnableVertexAttribArray(aPos)
         GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 16, vb)
@@ -464,8 +472,9 @@ class PreviewRenderer(
             GLES20.glViewport(0, 0, encW, encH)
             GLES20.glUseProgram(program)
 
+            val q = if (portraitMode) quadPortrait else quadLandscape
             vb.position(0)
-            vb.put(quadStatic)
+            vb.put(q)
             vb.position(0)
             GLES20.glEnableVertexAttribArray(aPos)
             GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 16, vb)
@@ -499,8 +508,9 @@ class PreviewRenderer(
         }
         EGL14.eglMakeCurrent(disp, drawSurf, drawSurf, eglCtx)
         GLES20.glViewport(0, 0, glSurfaceW, glSurfaceH)
+        val q = if (portraitMode) quadPortrait else quadLandscape
         vb.position(0)
-        vb.put(quadStatic)
+        vb.put(q)
         vb.position(0)
     }
 }
