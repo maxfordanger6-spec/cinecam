@@ -383,6 +383,8 @@ class MainActivity : Activity(), SensorEventListener {
             (size?.height ?: 0) <= 1080) " STAB" else ""
         val hdr = if (hdrOn && controller.hdrOn) " HDR" else ""
         statusLabel.text = "$resTxt ${st.fps} • $prof • $enc ${mbps}M$stab$hdr"
+        val s = controller.capabilities?.sensorOrientation ?: -1
+        statusLabel.text = "${statusLabel.text} | S$s D${controller.deviceRotation} T${controller.totalRotation}"
         if (lastTest.isNotEmpty()) statusLabel.text = "${statusLabel.text} | $lastTest"
     }
 
@@ -1026,8 +1028,17 @@ class MainActivity : Activity(), SensorEventListener {
             else -> 0
         }
         controller.deviceRotation = deg
-        renderer.rotationDegrees = controller.totalRotation.toFloat()
+        val t = controller.totalRotation
+        renderer.rotationDegrees = t.toFloat()
+        if (t != lastRotLog) {
+            lastRotLog = t
+            val s = controller.capabilities?.sensorOrientation ?: -1
+            appendDebug("rot S=$s D=$deg T=$t")
+        }
+        updateStatusLabel()
     }
+
+    private var lastRotLog = -1
 
     override fun onResume() {
         super.onResume()
@@ -1069,6 +1080,10 @@ class MainActivity : Activity(), SensorEventListener {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         updateRotation()
+        // some OEMs (MIUI/HyperOS) update display rotation ASYNCHRONOUSLY for
+        // fullSensor windows — re-read shortly after the config change
+        main.postDelayed({ updateRotation() }, 150)
+        main.postDelayed({ updateRotation() }, 500)
         hideSystemBars()
     }
 }

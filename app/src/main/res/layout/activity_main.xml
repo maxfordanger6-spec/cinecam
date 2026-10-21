@@ -122,7 +122,7 @@
             android:id="@+id/debugLabel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="v2.5"
+            android:text="v2.6"
             android:textColor="#80FF8080"
             android:textSize="8sp"
             android:fontFamily="monospace"
