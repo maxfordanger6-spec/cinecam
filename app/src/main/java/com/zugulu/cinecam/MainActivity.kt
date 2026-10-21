@@ -768,23 +768,19 @@ class MainActivity : Activity(), SensorEventListener {
             cap.dynamicRange.contains(DynamicRangeProfiles.HLG10)
 
         var surface: Surface? = null
-        var glDriven = false
-        // Pre-rotation: when the sensor isn't landscape-native, render rotated frames
-        // into the encoder via EGL so the FILE is physically upright (no player
-        // metadata reliance — fixes the "top/bottom + mirror" playback bug).
-        val preRotate = !hdr && ((controller.capabilities?.sensorOrientation ?: 0) % 180 != 0)
-        val encSize = if (preRotate) Size(size.height, size.width) else size
+        // GL-driven encoding: the renderer draws the DISPLAY geometry (AOSP math) into
+        // the encoder — the file is physically upright everywhere, no metadata hints.
+        var glDriven = !hdr
+        val encSize = size
         // Path 1: MediaCodec + MediaMuxer (zero-copy, HDR-capable, extreme bitrates)
         try {
             val r = Mp4Recorder(this)
             surface = r.prepare(encSize, controller.state.fps, bitrate, hdr,
-                if (preRotate) 0 else controller.totalRotation) { m -> appendDebug(m) }
+                if (glDriven) 0 else controller.totalRotation) { m -> appendDebug(m) }
             mp4 = r
             recorderCodec = r.codecName
-            if (preRotate && surface != null) {
-                renderer.attachEncoder(surface, encSize.width, encSize.height,
-                    controller.totalRotation.toFloat())
-                glDriven = true
+            if (glDriven && surface != null) {
+                renderer.attachEncoder(surface, encSize.width, encSize.height)
                 appendDebug("encoder GL-driven ${encSize.width}x${encSize.height}")
             }
         } catch (e: Exception) {
@@ -1006,8 +1002,9 @@ class MainActivity : Activity(), SensorEventListener {
             else -> 0
         }
         controller.deviceRotation = deg
+        renderer.displayRotation = rot
+        renderer.sensorOrientation = controller.capabilities?.sensorOrientation ?: 90
         val t = controller.totalRotation
-        renderer.rotationDegrees = t.toFloat()
         if (t != lastRotLog) {
             lastRotLog = t
             val s = controller.capabilities?.sensorOrientation ?: -1

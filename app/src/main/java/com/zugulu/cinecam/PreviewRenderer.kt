@@ -41,7 +41,8 @@ class PreviewRenderer(
     @Volatile var falseColorOn = false
     @Volatile var lutOn = false
     @Volatile var zebraLevel = 0.95f
-    @Volatile var rotationDegrees = 0f  // total preview rotation (sensor - device)
+    @Volatile var displayRotation = 0   // Surface.ROTATION_0/90/180/270
+    @Volatile var sensorOrientation = 90
 
     /** Latest center-pixel average from the GL framebuffer (for diagnostics). */
     @Volatile var lastCenterRgb = intArrayOf(0, 0, 0)
@@ -83,22 +84,29 @@ class PreviewRenderer(
     @Volatile var textureW = 1920
     @Volatile var textureH = 1080
 
-    // AOSP Camera2Basic orientation math: the quad is mapped view->buffer with the
-    // buffer rect TRANSPOSED, FILL-scaled, then rotated by totalRotation in screen
-    // space. This is the exact algorithm stock camera apps use — correct aspect and
-    // orientation in both portrait and landscape, no UV gymnastics.
+    // AOSP Camera2Basic orientation math, verbatim: the buffer rect is TRANSPOSED
+    // (that transpose is the sensor's 90°), FILL-scaled, then rotated by the DISPLAY
+    // rotation only: -90°/+90° in landscape, 180° upside-down, identity in portrait.
+    // Mixing in totalRotation on top = double rotation (the diagonal/stretched bug).
     private val quadDisp = FloatArray(16)
     private val quadEnc = FloatArray(16)
 
     private fun buildQuad(dst: FloatArray, viewW: Int, viewH: Int,
-                          texW: Int, texH: Int, rotDeg: Float) {
+                          texW: Int, texH: Int, deviceRot: Int) {
         val viewRect = RectF(0f, 0f, viewW.toFloat(), viewH.toFloat())
         val bufferRect = RectF(0f, 0f, texH.toFloat(), texW.toFloat())   // transposed!
-        bufferRect.offset(viewRect.centerX() - bufferRect.centerX(),
-            viewRect.centerY() - bufferRect.centerY())
+        val cx = viewRect.centerX()
+        val cy = viewRect.centerY()
         val m = GMatrix()
-        m.setRectToRect(viewRect, bufferRect, GMatrix.ScaleToFit.FILL)
-        m.postRotate(rotDeg, viewRect.centerX(), viewRect.centerY())
+        if (deviceRot == Surface.ROTATION_90 || deviceRot == Surface.ROTATION_270) {
+            bufferRect.offset(cx - bufferRect.centerX(), cy - bufferRect.centerY())
+            m.setRectToRect(viewRect, bufferRect, GMatrix.ScaleToFit.FILL)
+            val scale = maxOf(viewH.toFloat() / texH, viewW.toFloat() / texW)
+            m.postScale(scale, scale, cx, cy)
+            m.postRotate(90f * (deviceRot - 2), cx, cy)
+        } else if (deviceRot == Surface.ROTATION_180) {
+            m.postRotate(180f, cx, cy)
+        }
         val corners = floatArrayOf(
             0f, 0f, viewW.toFloat(), 0f,
             0f, viewH.toFloat(), viewW.toFloat(), viewH.toFloat())
@@ -325,7 +333,7 @@ class PreviewRenderer(
         GLES20.glUseProgram(program)
 
         // AOSP orientation: rebuild the quad for the current view/size/rotation
-        buildQuad(quadDisp, glSurfaceW, glSurfaceH, textureW, textureH, rotationDegrees)
+        buildQuad(quadDisp, glSurfaceW, glSurfaceH, textureW, textureH, displayRotation)
         vb.position(0)
         vb.put(quadDisp)
         vb.position(0)
@@ -407,18 +415,16 @@ class PreviewRenderer(
     private var eglCtx: EGLContext? = null
     private var encW = 0
     private var encH = 0
-    private var encRot = 0f
     @Volatile private var pendingEncoder: Surface? = null
     @Volatile private var encDetachRequested = false
 
     /** Attach a MediaCodec input surface. Called from the UI thread. */
-    fun attachEncoder(surface: Surface, w: Int, h: Int, rotDegrees: Float) {
+    fun attachEncoder(surface: Surface, w: Int, h: Int) {
         encW = w
         encH = h
-        encRot = rotDegrees
         pendingEncoder = surface
         encDetachRequested = false
-        onDebug?.invoke("encoder attach ${w}x${h} rot=$rotDegrees")
+        onDebug?.invoke("encoder attach ${w}x${h}")
     }
 
     /** Stop feeding + destroy the encoder EGL surface (next GL frame). */
@@ -484,7 +490,7 @@ class PreviewRenderer(
             GLES20.glViewport(0, 0, encW, encH)
             GLES20.glUseProgram(program)
 
-            buildQuad(quadEnc, encW, encH, textureW, textureH, encRot)
+            buildQuad(quadEnc, encW, encH, textureW, textureH, displayRotation)
             vb.position(0)
             vb.put(quadEnc)
             vb.position(0)
