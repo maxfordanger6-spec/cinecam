@@ -198,7 +198,7 @@ class MainActivity : Activity(), SensorEventListener {
         wireGestures()
         wireRecording()
 
-        oriIdx = getSharedPreferences("cinecam", MODE_PRIVATE).getInt("oriIdx_v23", 0)
+        oriIdx = getSharedPreferences("cinecam", MODE_PRIVATE).getInt("oriIdx_v25", 0)
         applyOri()
 
         ticker = object : Runnable {
@@ -511,10 +511,10 @@ class MainActivity : Activity(), SensorEventListener {
     }
 
     private fun applyOri() {
-        // idx0 = auto-correct (pure rotation, no flip) — verified math:
-        // scene top -> screen top, scene right -> screen right (back camera)
+        // idx0 = auto-correct: rotation then vertical flip — verified edge-by-edge
+        // (scene top -> screen top, scene right -> screen right, back camera)
         // variants 1..7 cover deviant HALs, 8 = RAW diagnostic
-        val f = arrayOf(false, true, false, true, false, true, false, true, false)[oriIdx]
+        val f = arrayOf(true, false, true, false, true, false, true, false, false)[oriIdx]
         val r = arrayOf(0f, 0f, 90f, 90f, 180f, 180f, 270f, 270f, 0f)[oriIdx]
         renderer.rawMode = oriIdx == 8
         renderer.flipMode = f
@@ -523,7 +523,7 @@ class MainActivity : Activity(), SensorEventListener {
         setAssistBtn(R.id.oriBtn, oriIdx != 0)
         appendDebug("ori=${oriIdx + 1} flip=$f rot=$r${if (oriIdx == 8) " RAW" else ""}")
         getSharedPreferences("cinecam", MODE_PRIVATE).edit()
-            .putInt("oriIdx_v23", oriIdx).apply()
+            .putInt("oriIdx_v25", oriIdx).apply()
     }
 
     private fun applyLut() {
@@ -790,16 +790,29 @@ class MainActivity : Activity(), SensorEventListener {
             cap.dynamicRange.contains(DynamicRangeProfiles.HLG10)
 
         var surface: Surface? = null
+        var glDriven = false
+        // Pre-rotation: when the sensor isn't landscape-native, render rotated frames
+        // into the encoder via EGL so the FILE is physically upright (no player
+        // metadata reliance — fixes the "top/bottom + mirror" playback bug).
+        val preRotate = !hdr && ((controller.capabilities?.sensorOrientation ?: 0) % 180 != 0)
+        val encSize = if (preRotate) Size(size.height, size.width) else size
         // Path 1: MediaCodec + MediaMuxer (zero-copy, HDR-capable, extreme bitrates)
         try {
             val r = Mp4Recorder(this)
-            surface = r.prepare(size, controller.state.fps, bitrate, hdr,
-                controller.totalRotation) { m -> appendDebug(m) }
+            surface = r.prepare(encSize, controller.state.fps, bitrate, hdr,
+                if (preRotate) 0 else controller.totalRotation) { m -> appendDebug(m) }
             mp4 = r
             recorderCodec = r.codecName
+            if (preRotate && surface != null) {
+                renderer.attachEncoder(surface, encSize.width, encSize.height,
+                    controller.totalRotation.toFloat())
+                glDriven = true
+                appendDebug("encoder GL-driven ${encSize.width}x${encSize.height}")
+            }
         } catch (e: Exception) {
             appendDebug("mp4 prepare failed: ${e.message}")
-            // Path 2: MediaRecorder fallback (SDR only)
+            glDriven = false
+            // Path 2: MediaRecorder fallback (SDR only, metadata rotation hint)
             try {
                 val rec = prepareRecorder(size)
                 fallbackRec = rec
@@ -816,7 +829,7 @@ class MainActivity : Activity(), SensorEventListener {
             return
         }
 
-        controller.startRecording(surf,
+        controller.startRecording(surf, addToSession = !glDriven,
             onReady = {
                 runOnUiThread {
                     isRecording = true
@@ -862,6 +875,8 @@ class MainActivity : Activity(), SensorEventListener {
         fallbackRec = null
         try { fb?.stop() } catch (e: Exception) { Log.e("CineCam", "recorder.stop", e) }
         try { fb?.release() } catch (_: Exception) {}
+        // stop GL feeding the encoder BEFORE signaling EOS
+        renderer.detachEncoder()
         finalizeMediaStore()
         controller.stopRecording {
             runOnUiThread {

@@ -1,14 +1,21 @@
 package com.zugulu.cinecam
-
 import android.content.Context
 import android.graphics.SurfaceTexture
+import android.opengl.EGL14
+import android.opengl.EGLConfig
+import android.opengl.EGLContext
+import android.opengl.EGLDisplay
+import android.opengl.EGLExt
+import android.opengl.EGLSurface
+import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
+import android.view.Surface
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
-import javax.microedition.khronos.egl.EGLConfig
+import javax.microedition.khronos.egl.EGLConfig as KConfig
 import javax.microedition.khronos.opengles.GL10
 
 class PreviewRenderer(
@@ -35,7 +42,7 @@ class PreviewRenderer(
     @Volatile var rotationDegrees = 0f  // total preview rotation (sensor - device)
     @Volatile var rotSign = 1f          // flip to -1f if preview appears rotated the wrong way
     @Volatile var rotOffset = 0f        // manual ORI adjust (0/90/180/270)
-    @Volatile var flipMode = false      // extra vertical flip (ONLY for deviant HALs)
+    @Volatile var flipMode = true       // vertical flip AFTER rotation (verified: top->top, right->right)
     @Volatile var rawMode = false       // DIAGNOSTIC: raw sampling (no transform)
 
     /** Latest center-pixel average from the GL framebuffer (for diagnostics). */
@@ -97,10 +104,10 @@ class PreviewRenderer(
                 vTexCoord = aTexCoord;                 // DIAGNOSTIC: raw sampling
             } else {
                 vec2 uv = aTexCoord;
-                if (uFlip == 1) uv.y = 1.0 - uv.y;     // GL buffer origin fix (sensor top = v0)
                 float rad = radians(uRot);
                 float c = cos(rad), s = sin(rad);
                 uv = mat2(c, -s, s, c) * (uv - 0.5) + 0.5;
+                if (uFlip == 1) uv.y = 1.0 - uv.y;     // flip AFTER rotation (verified order)
                 vTexCoord = (uSTMatrix * vec4(uv, 0.0, 1.0)).xy;
             }
             gl_Position = aPosition;
@@ -206,7 +213,7 @@ class PreviewRenderer(
         return sh
     }
 
-    override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+    override fun onSurfaceCreated(gl: GL10?, config: KConfig?) {
         program = GLES20.glCreateProgram()
         val vs = compile(GLES20.GL_VERTEX_SHADER, VERT)
         val fs = compile(GLES20.GL_FRAGMENT_SHADER, FRAG)
@@ -303,6 +310,7 @@ class PreviewRenderer(
         val st = surfaceTexture ?: return
         st.updateTexImage()
         st.getTransformMatrix(textureTransform)
+        val frameTs = st.timestamp
         uploadLutIfDirty()
 
         GLES20.glClearColor(0f, 0.004f, 0.008f, 1f)   // very dark blue — distinguishes
@@ -341,6 +349,10 @@ class PreviewRenderer(
         GLES20.glDisableVertexAttribArray(aPos)
         GLES20.glDisableVertexAttribArray(aUV)
 
+        // ---- encoder pass: pre-rotated frames into MediaCodec (zero-copy, no overlays) ----
+        manageEncoderEgl()
+        if (encEglSurface != null) drawEncoderFrame(frameTs, rot)
+
         // DIAGNOSTIC: report whether frames actually reach the SurfaceTexture
         frameCount++
         if (frameCount % 150L == 1L) {
@@ -378,7 +390,129 @@ class PreviewRenderer(
         }
     }
 
-    object GLES11Ext {
-        const val GL_TEXTURE_EXTERNAL_OES = 0x8D65
+    // ---------------- encoder EGL pass ----------------
+    // Renders each fresh camera frame into the MediaCodec input surface,
+    // pre-rotated (same transform as the display, no monitoring overlays),
+    // with real PTS via eglPresentationTimeANDROID. Runs on the GL thread
+    // inside onDrawFrame, sharing the renderer's own context by re-binding.
+
+    private var encEglSurface: EGLSurface? = null
+    private var eglDisp: EGLDisplay? = null
+    private var eglCtx: EGLContext? = null
+    private var encW = 0
+    private var encH = 0
+    private var encRot = 0f
+    @Volatile private var pendingEncoder: Surface? = null
+    @Volatile private var encDetachRequested = false
+
+    /** Attach a MediaCodec input surface. Called from the UI thread. */
+    fun attachEncoder(surface: Surface, w: Int, h: Int, rotDegrees: Float) {
+        encW = w
+        encH = h
+        encRot = rotDegrees
+        pendingEncoder = surface
+        encDetachRequested = false
+        onDebug?.invoke("encoder attach ${w}x${h} rot=$rotDegrees")
+    }
+
+    /** Stop feeding + destroy the encoder EGL surface (next GL frame). */
+    fun detachEncoder() {
+        pendingEncoder = null
+        encDetachRequested = true
+    }
+
+    private fun manageEncoderEgl() {
+        if (encDetachRequested && encEglSurface != null) {
+            try {
+                val disp = eglDisp
+                if (disp != null) {
+                    EGL14.eglMakeCurrent(disp, encEglSurface, encEglSurface, eglCtx)
+                    EGL14.eglDestroySurface(disp, encEglSurface)
+                }
+            } catch (_: Exception) {}
+            encEglSurface = null
+            encDetachRequested = false
+            onDebug?.invoke("encoder EGL detached")
+        }
+        if (pendingEncoder != null && encEglSurface == null) {
+            try {
+                val disp = EGL14.eglGetCurrentDisplay()
+                val ctx = EGL14.eglGetCurrentContext()
+                if (disp != EGL14.EGL_NO_DISPLAY && ctx != EGL14.EGL_NO_CONTEXT) {
+                    val cfgAttribs = intArrayOf(
+                        EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8,
+                        EGL14.EGL_BLUE_SIZE, 8, EGL14.EGL_ALPHA_SIZE, 8,
+                        EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT,
+                        EGL14.EGL_NONE)
+                    val configs = arrayOfNulls<EGLConfig>(1)
+                    val n = IntArray(1)
+                    if (EGL14.eglChooseConfig(disp, cfgAttribs, 0, configs, 0, 1, n, 0) && n[0] > 0) {
+                        val surf = EGL14.eglCreateWindowSurface(disp, configs[0],
+                            pendingEncoder, intArrayOf(EGL14.EGL_NONE), 0)
+                        if (surf != null && surf != EGL14.EGL_NO_SURFACE) {
+                            encEglSurface = surf
+                            eglDisp = disp
+                            eglCtx = ctx
+                            onDebug?.invoke("encoder EGL surface created")
+                        } else {
+                            onDebug?.invoke("encoder EGL createWindowSurface failed")
+                        }
+                    } else {
+                        onDebug?.invoke("encoder EGL chooseConfig failed")
+                    }
+                }
+            } catch (e: Exception) {
+                onDebug?.invoke("encoder EGL init failed: ${e.message}")
+            }
+            pendingEncoder = null
+        }
+    }
+
+    private fun drawEncoderFrame(tsNs: Long, displayRot: Float) {
+        val surf = encEglSurface ?: return
+        val disp = eglDisp ?: return
+        val drawSurf = EGL14.eglGetCurrentSurface(EGL14.EGL_DRAW)
+        if (drawSurf == null || drawSurf == EGL14.EGL_NO_SURFACE) return
+        if (!EGL14.eglMakeCurrent(disp, surf, surf, eglCtx)) return
+        try {
+            GLES20.glViewport(0, 0, encW, encH)
+            GLES20.glUseProgram(program)
+
+            vb.position(0)
+            GLES20.glEnableVertexAttribArray(aPos)
+            GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 16, vb)
+            GLES20.glEnableVertexAttribArray(aUV)
+            vb.position(2)
+            GLES20.glVertexAttribPointer(aUV, 2, GLES20.GL_FLOAT, false, 16, vb)
+
+            GLES20.glUniformMatrix4fv(uSTMatrix, 1, false, textureTransform, 0)
+            GLES20.glUniform1f(uRot, displayRot)
+            GLES20.glUniform1i(uRaw, 0)
+            GLES20.glUniform1i(uFlip, if (flipMode) 1 else 0)
+            GLES20.glUniform1i(uPeak, 0)      // monitoring overlays are preview-only
+            GLES20.glUniform1i(uZebra, 0)
+            GLES20.glUniform1i(uFalseColor, 0)
+            GLES20.glUniform1i(uLutOn, 0)
+            GLES20.glUniform1f(uZebraLvl, 1f)
+            GLES20.glUniform2f(uTexel, 1f / encW, 1f / encH)
+
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "sTexture"), 0)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, lutTexId)
+            GLES20.glUniform1i(uLutSampler, 1)
+
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            GLES20.glDisableVertexAttribArray(aPos)
+            GLES20.glDisableVertexAttribArray(aUV)
+
+            EGLExt.eglPresentationTimeANDROID(disp, surf, tsNs)
+            EGL14.eglSwapBuffers(disp, surf)
+        } catch (e: Exception) {
+            onDebug?.invoke("encoder draw failed: ${e.message}")
+        }
+        EGL14.eglMakeCurrent(disp, drawSurf, drawSurf, eglCtx)
+        GLES20.glViewport(0, 0, glSurfaceW, glSurfaceH)
     }
 }

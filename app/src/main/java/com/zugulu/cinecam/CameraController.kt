@@ -49,12 +49,12 @@ data class Capabilities(
     val maxZoom: Float,
     val gainsMin: Float, val gainsMax: Float,
     val sensorOrientation: Int,
+    val dynamicRange: Set<Long>,         // DynamicRangeProfile values (API 33+), e.g. HLG10
     val activeArray: Rect,
     val sizes: List<Size>,               // sorted desc, 16:9 preferred
     val fpsSupported: Set<Int>,
     val stabilizationSupported: Boolean,
-    val hardwareLevel: Int,
-    val dynamicRange: Set<Long>          // DynamicRangeProfile values (API 33+), e.g. HLG10
+    val hardwareLevel: Int
 )
 
 class CameraController(
@@ -284,8 +284,8 @@ class CameraController(
         } else emptySet()
 
         val cap = Capabilities(isoRange.lower, isoRange.upper, expoRange.lower, expoRange.upper,
-            minFocus, maxZoom, gainsMin, gainsMax, orientation, active,
-            chosenSizes.take(6), fpsSet, stab, level, dynRange)
+            minFocus, maxZoom, gainsMin, gainsMax, orientation, dynRange, active,
+            chosenSizes.take(6), fpsSet, stab, level)
         d("caps: level=$level iso=$isoRange fps=$fpsSet stab=$stab hdr=$dynRange")
         d("rec size0=${chosenSizes.firstOrNull()} preview=$previewPick")
 
@@ -589,7 +589,8 @@ class CameraController(
      * Start recording: rebuilds the session with the given encoder input surface
      * (MediaCodec EGL surface or MediaRecorder surface — same contract).
      */
-    fun startRecording(surface: Surface, onReady: () -> Unit, onError: (String) -> Unit) {
+    fun startRecording(surface: Surface, addToSession: Boolean = true,
+                       onReady: () -> Unit, onError: (String) -> Unit) {
         val cam = device ?: return
         val s = session
         try {
@@ -598,19 +599,23 @@ class CameraController(
         try {
             if (recording) return
             val texSurface = previewSurface!!
-            recordSurface = surface
+            // GL-driven encoding: the renderer draws into the encoder surface via EGL,
+            // so the camera must NOT target it directly.
+            recordSurface = if (addToSession) surface else null
 
             if (Build.VERSION.SDK_INT >= 28) {
                 val outputs = mutableListOf<OutputConfiguration>()
                 outputs.add(OutputConfiguration(texSurface))
                 histogramReader?.let { outputs.add(OutputConfiguration(it.surface)) }
-                val oc = OutputConfiguration(recordSurface!!)
-                if (Build.VERSION.SDK_INT >= 33 && hdrOn &&
-                    capabilities?.dynamicRange?.contains(DynamicRangeProfiles.HLG10) == true) {
-                    try { oc.setDynamicRangeProfile(DynamicRangeProfiles.HLG10) }
-                    catch (e: Exception) { d("HDR profile set failed: ${e.message}") }
+                recordSurface?.let { rs ->
+                    val oc = OutputConfiguration(rs)
+                    if (Build.VERSION.SDK_INT >= 33 && hdrOn &&
+                        capabilities?.dynamicRange?.contains(DynamicRangeProfiles.HLG10) == true) {
+                        try { oc.setDynamicRangeProfile(DynamicRangeProfiles.HLG10) }
+                        catch (e: Exception) { d("HDR profile set failed: ${e.message}") }
+                    }
+                    outputs.add(oc)
                 }
-                outputs.add(oc)
 
                 s?.close()
                 cam.createCaptureSession(
@@ -626,7 +631,7 @@ class CameraController(
                         }))
             } else {
                 val surfaces = mutableListOf<Surface>(texSurface)
-                surfaces.add(recordSurface!!)
+                recordSurface?.let { surfaces.add(it) }
                 histogramReader?.let { surfaces.add(it.surface) }
                 s?.close()
                 cam.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
@@ -654,7 +659,7 @@ class CameraController(
         try {
             val b = cam.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
             b.addTarget(texSurface)
-            b.addTarget(recordSurface!!)
+            recordSurface?.let { b.addTarget(it) }
             histogramReader?.let { b.addTarget(it.surface) }
             applyState(b)
             previewBuilder = b
