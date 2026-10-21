@@ -60,6 +60,12 @@ object Profiles {
         0.86f, 0.88f, 1.0f, 0.98f
     )
 
+    // Ultra-flat: blacks lifted ~18%, highlights rolled ~85% — max grading latitude
+    private val ULTRA_FLAT = floatArrayOf(
+        0.0f, 0.18f, 0.20f, 0.38f, 0.40f, 0.52f, 0.60f, 0.64f,
+        0.80f, 0.75f, 0.92f, 0.83f, 1.0f, 0.88f
+    )
+
     val ALL: List<Profile> = listOf(
         Profile(
             "Natural", "NAT", "Clean, true-to-life colors",
@@ -99,6 +105,11 @@ object Profiles {
         Profile(
             "Mono", "MON", "High-contrast black & white",
             MONO_S, MONO_S, MONO_S, 0.0f,
+            floatArrayOf(1f, 1f, 1f, 1f)
+        ),
+        Profile(
+            "Flat", "FLAT", "Ultra-flat: maximum grading latitude, minimal contrast",
+            ULTRA_FLAT, ULTRA_FLAT, ULTRA_FLAT, 0.72f,
             floatArrayOf(1f, 1f, 1f, 1f)
         )
     )

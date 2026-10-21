@@ -84,6 +84,9 @@ class Mp4Recorder(private val context: Context) {
     var codecName = "H264"
         private set
 
+    /** MediaStore uri of the output (valid after prepare(), cleared on stop). */
+    fun savedUri(): Uri? = outputUri
+
     /**
      * Configure codecs + muxer. Returns the encoder input surface to add to the
      * capture session. Throws on any failure (caller falls back to MediaRecorder).

@@ -3,7 +3,9 @@ package com.zugulu.cinecam
 import android.Manifest
 import android.app.Activity
 import android.content.ContentValues
+import android.content.ContentUris
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
@@ -69,6 +71,7 @@ class MainActivity : Activity(), SensorEventListener {
     private var mp4: Mp4Recorder? = null
     private var fallbackRec: MediaRecorder? = null
     private var pendingUri: Uri? = null
+    private var lastSavedUri: Uri? = null
     private var recordingStart = 0L
     private var isRecording = false
     private var recorderCodec = "H264"
@@ -466,6 +469,9 @@ class MainActivity : Activity(), SensorEventListener {
         findViewById<TextView>(R.id.testBtn).setOnClickListener {
             sensorSelfTest()
         }
+        findViewById<TextView>(R.id.galleryBtn).setOnClickListener {
+            openLastVideo()
+        }
         findViewById<TextView>(R.id.safeBtn).setOnClickListener {
             controller.safeLevel = (controller.safeLevel + 1) % 4
             controller.update()
@@ -791,6 +797,7 @@ class MainActivity : Activity(), SensorEventListener {
                 if (glDriven) 0 else controller.totalRotation) { m -> appendDebug(m) }
             mp4 = r
             recorderCodec = r.codecName
+            lastSavedUri = r.savedUri()
             if (glDriven && surface != null) {
                 renderer.attachEncoder(surface, encSize.width, encSize.height)
                 appendDebug("encoder GL-driven ${encSize.width}x${encSize.height}")
@@ -803,6 +810,7 @@ class MainActivity : Activity(), SensorEventListener {
                 val rec = prepareRecorder(size)
                 fallbackRec = rec
                 surface = rec?.surface
+                lastSavedUri = pendingUri
             } catch (e2: Exception) {
                 appendDebug("recorder fallback failed: ${e2.message}")
             }
@@ -889,6 +897,41 @@ class MainActivity : Activity(), SensorEventListener {
             }
         } catch (_: Exception) {}
         pendingUri = null
+    }
+
+    /** Open the last recording in the system video player (falls back to the
+     *  most recent clip in Movies/CineCamPro). */
+    private fun openLastVideo() {
+        val uri = lastSavedUri ?: queryLastVideo()
+        if (uri == null) {
+            Toast.makeText(this, "Aucun enregistrement pour l'instant", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val i = Intent(Intent.ACTION_VIEW)
+            i.setDataAndType(uri, "video/mp4")
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            startActivity(i)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Lecture impossible", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun queryLastVideo(): Uri? {
+        if (Build.VERSION.SDK_INT < 29) return null
+        return try {
+            val c = contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Video.Media._ID),
+                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?",
+                arrayOf("%CineCamPro%"),
+                "${MediaStore.Video.Media.DATE_ADDED} DESC LIMIT 1")
+            val uri = if (c != null && c.moveToFirst())
+                ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, c.getLong(0))
+            else null
+            c?.close()
+            uri
+        } catch (e: Exception) { null }
     }
 
     // ---------------- helpers ----------------
