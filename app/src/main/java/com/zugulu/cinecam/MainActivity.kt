@@ -104,7 +104,6 @@ class MainActivity : Activity(), SensorEventListener {
     private var retOn = false
     private var hdrOn = false
     private var lutIdx = 0   // 0=off, 1=profile LUT, 2=T&O, 3=NOIR, 4=PASTL
-    private var oriIdx = 0   // 0..7 rotation variants, 8 = raw diagnostic
 
     private lateinit var reticleView: ReticleView
 
@@ -197,9 +196,6 @@ class MainActivity : Activity(), SensorEventListener {
         wireChips()
         wireGestures()
         wireRecording()
-
-        oriIdx = getSharedPreferences("cinecam", MODE_PRIVATE).getInt("oriIdx_v25", 0)
-        applyOri()
 
         ticker = object : Runnable {
             override fun run() {
@@ -477,10 +473,6 @@ class MainActivity : Activity(), SensorEventListener {
                 else -> "(full profiles)"
             })
         }
-        findViewById<TextView>(R.id.oriBtn).setOnClickListener {
-            oriIdx = (oriIdx + 1) % 9
-            applyOri()
-        }
         findViewById<TextView>(R.id.fcBtn).setOnClickListener {
             falseColorOn = !falseColorOn
             renderer.falseColorOn = falseColorOn
@@ -510,22 +502,6 @@ class MainActivity : Activity(), SensorEventListener {
                     true)
             }
         }
-    }
-
-    private fun applyOri() {
-        // idx0 = auto-correct: rotation then vertical flip — verified edge-by-edge
-        // (scene top -> screen top, scene right -> screen right, back camera)
-        // variants 1..7 cover deviant HALs, 8 = RAW diagnostic
-        val f = arrayOf(true, false, true, false, true, false, true, false, false)[oriIdx]
-        val r = arrayOf(0f, 0f, 90f, 90f, 180f, 180f, 270f, 270f, 0f)[oriIdx]
-        renderer.rawMode = oriIdx == 8
-        renderer.flipMode = f
-        renderer.rotOffset = r
-        findViewById<TextView>(R.id.oriBtn).text = "ORI${oriIdx + 1}"
-        setAssistBtn(R.id.oriBtn, oriIdx != 0)
-        appendDebug("ori=${oriIdx + 1} flip=$f rot=$r${if (oriIdx == 8) " RAW" else ""}")
-        getSharedPreferences("cinecam", MODE_PRIVATE).edit()
-            .putInt("oriIdx_v25", oriIdx).apply()
     }
 
     private fun applyLut() {
@@ -973,6 +949,8 @@ class MainActivity : Activity(), SensorEventListener {
         val sz = cap.sizes.first()
         controller.videoHeight = sz.height
         glView.setAspect(sz.width, sz.height)
+        renderer.textureW = controller.previewSize.width
+        renderer.textureH = controller.previewSize.height
         resChip.text = resLabel(sz)
         findViewById<TextView>(R.id.camBtn).visibility =
             if (controller.enumerate().size > 1) View.VISIBLE else View.GONE

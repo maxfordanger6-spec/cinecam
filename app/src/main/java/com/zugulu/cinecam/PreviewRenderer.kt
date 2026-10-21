@@ -1,5 +1,7 @@
 package com.zugulu.cinecam
 import android.content.Context
+import android.graphics.Matrix as GMatrix
+import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.opengl.EGL14
 import android.opengl.EGLConfig
@@ -10,7 +12,7 @@ import android.opengl.EGLSurface
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
-import android.opengl.Matrix
+import android.opengl.Matrix as GLMatrix
 import android.view.Surface
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -40,10 +42,6 @@ class PreviewRenderer(
     @Volatile var lutOn = false
     @Volatile var zebraLevel = 0.95f
     @Volatile var rotationDegrees = 0f  // total preview rotation (sensor - device)
-    @Volatile var rotSign = 1f          // flip to -1f if preview appears rotated the wrong way
-    @Volatile var rotOffset = 0f        // manual ORI adjust (0/90/180/270)
-    @Volatile var flipMode = true       // vertical flip AFTER rotation (verified: top->top, right->right)
-    @Volatile var rawMode = false       // DIAGNOSTIC: raw sampling (no transform)
 
     /** Latest center-pixel average from the GL framebuffer (for diagnostics). */
     @Volatile var lastCenterRgb = intArrayOf(0, 0, 0)
@@ -58,23 +56,13 @@ class PreviewRenderer(
         lutVersion++
     }
 
-    private val vtx = floatArrayOf(
-        // x, y, u, v
-        -1f, -1f, 0f, 0f,
-         1f, -1f, 1f, 0f,
-        -1f,  1f, 0f, 1f,
-         1f,  1f, 1f, 1f
-    )
-    private val vb: FloatBuffer = ByteBuffer.allocateDirect(vtx.size * 4)
-        .order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(vtx); position(0) }
+    private val vb: FloatBuffer = ByteBuffer.allocateDirect(16 * 4)
+        .order(ByteOrder.nativeOrder()).asFloatBuffer()
 
     private var program = 0
     private var aPos = 0
     private var aUV = 0
     private var uSTMatrix = 0
-    private var uRot = 0
-    private var uRaw = 0
-    private var uFlip = 0
     private var uPeak = 0
     private var uZebra = 0
     private var uFalseColor = 0
@@ -91,26 +79,48 @@ class PreviewRenderer(
     private var glSurfaceW = 0
     private var glSurfaceH = 0
 
+    /** Preview texture size (camera buffer), landscape-normalized. */
+    @Volatile var textureW = 1920
+    @Volatile var textureH = 1080
+
+    // AOSP Camera2Basic orientation math: the quad is mapped view->buffer with the
+    // buffer rect TRANSPOSED, FILL-scaled, then rotated by totalRotation in screen
+    // space. This is the exact algorithm stock camera apps use — correct aspect and
+    // orientation in both portrait and landscape, no UV gymnastics.
+    private val quadDisp = FloatArray(16)
+    private val quadEnc = FloatArray(16)
+
+    private fun buildQuad(dst: FloatArray, viewW: Int, viewH: Int,
+                          texW: Int, texH: Int, rotDeg: Float) {
+        val viewRect = RectF(0f, 0f, viewW.toFloat(), viewH.toFloat())
+        val bufferRect = RectF(0f, 0f, texH.toFloat(), texW.toFloat())   // transposed!
+        bufferRect.offset(viewRect.centerX() - bufferRect.centerX(),
+            viewRect.centerY() - bufferRect.centerY())
+        val m = GMatrix()
+        m.setRectToRect(viewRect, bufferRect, GMatrix.ScaleToFit.FILL)
+        m.postRotate(rotDeg, viewRect.centerX(), viewRect.centerY())
+        val corners = floatArrayOf(
+            0f, 0f, viewW.toFloat(), 0f,
+            0f, viewH.toFloat(), viewW.toFloat(), viewH.toFloat())
+        m.mapPoints(corners)
+        for (i in 0 until 4) {
+            val px = corners[i * 2]
+            val py = corners[i * 2 + 1]
+            dst[i * 4] = px / (viewW / 2f) - 1f
+            dst[i * 4 + 1] = py / (viewH / 2f) - 1f
+            dst[i * 4 + 2] = px / texH
+            dst[i * 4 + 3] = py / texW
+        }
+    }
+
     private val VERT = """
         uniform mat4 uSTMatrix;
-        uniform float uRot;
-        uniform int uRaw;
-        uniform int uFlip;
         attribute vec4 aPosition;
         attribute vec2 aTexCoord;
         varying vec2 vTexCoord;
         void main() {
-            if (uRaw == 1) {
-                vTexCoord = aTexCoord;                 // DIAGNOSTIC: raw sampling
-            } else {
-                vec2 uv = aTexCoord;
-                float rad = radians(uRot);
-                float c = cos(rad), s = sin(rad);
-                uv = mat2(c, -s, s, c) * (uv - 0.5) + 0.5;
-                if (uFlip == 1) uv.y = 1.0 - uv.y;     // flip AFTER rotation (verified order)
-                vTexCoord = (uSTMatrix * vec4(uv, 0.0, 1.0)).xy;
-            }
             gl_Position = aPosition;
+            vTexCoord = (uSTMatrix * vec4(aTexCoord, 0.0, 1.0)).xy;
         }
     """
 
@@ -231,9 +241,6 @@ class PreviewRenderer(
         aPos = GLES20.glGetAttribLocation(program, "aPosition")
         aUV = GLES20.glGetAttribLocation(program, "aTexCoord")
         uSTMatrix = GLES20.glGetUniformLocation(program, "uSTMatrix")
-        uRot = GLES20.glGetUniformLocation(program, "uRot")
-        uRaw = GLES20.glGetUniformLocation(program, "uRaw")
-        uFlip = GLES20.glGetUniformLocation(program, "uFlip")
         uPeak = GLES20.glGetUniformLocation(program, "uPeak")
         uZebra = GLES20.glGetUniformLocation(program, "uZebra")
         uFalseColor = GLES20.glGetUniformLocation(program, "uFalseColor")
@@ -262,7 +269,7 @@ class PreviewRenderer(
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
         lutUploadedVersion = -1
 
-        Matrix.setIdentityM(textureTransform, 0)
+        GLMatrix.setIdentityM(textureTransform, 0)
 
         // IMPORTANT: if the EGL context is recreated (surface resize etc.), the camera
         // is still streaming into the OLD SurfaceTexture. We must NOT release it here —
@@ -317,8 +324,10 @@ class PreviewRenderer(
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)    // GL-rendering from pure-black dead GL
         GLES20.glUseProgram(program)
 
-        val rot = (rotSign * (rotationDegrees + rotOffset)) % 360f
-
+        // AOSP orientation: rebuild the quad for the current view/size/rotation
+        buildQuad(quadDisp, glSurfaceW, glSurfaceH, textureW, textureH, rotationDegrees)
+        vb.position(0)
+        vb.put(quadDisp)
         vb.position(0)
         GLES20.glEnableVertexAttribArray(aPos)
         GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 16, vb)
@@ -327,9 +336,6 @@ class PreviewRenderer(
         GLES20.glVertexAttribPointer(aUV, 2, GLES20.GL_FLOAT, false, 16, vb)
 
         GLES20.glUniformMatrix4fv(uSTMatrix, 1, false, textureTransform, 0)
-        GLES20.glUniform1f(uRot, rot)
-        GLES20.glUniform1i(uRaw, if (rawMode) 1 else 0)
-        GLES20.glUniform1i(uFlip, if (flipMode) 1 else 0)
         GLES20.glUniform1i(uPeak, if (peakOn) 1 else 0)
         GLES20.glUniform1i(uZebra, if (zebraOn) 1 else 0)
         GLES20.glUniform1i(uFalseColor, if (falseColorOn) 1 else 0)
@@ -349,9 +355,9 @@ class PreviewRenderer(
         GLES20.glDisableVertexAttribArray(aPos)
         GLES20.glDisableVertexAttribArray(aUV)
 
-        // ---- encoder pass: pre-rotated frames into MediaCodec (zero-copy, no overlays) ----
+        // ---- encoder pass: same geometry, pre-rotated frames into MediaCodec ----
         manageEncoderEgl()
-        if (encEglSurface != null) drawEncoderFrame(frameTs, rot)
+        if (encEglSurface != null) drawEncoderFrame(frameTs)
 
         // DIAGNOSTIC: report whether frames actually reach the SurfaceTexture
         frameCount++
@@ -468,7 +474,7 @@ class PreviewRenderer(
         }
     }
 
-    private fun drawEncoderFrame(tsNs: Long, displayRot: Float) {
+    private fun drawEncoderFrame(tsNs: Long) {
         val surf = encEglSurface ?: return
         val disp = eglDisp ?: return
         val drawSurf = EGL14.eglGetCurrentSurface(EGL14.EGL_DRAW)
@@ -478,6 +484,9 @@ class PreviewRenderer(
             GLES20.glViewport(0, 0, encW, encH)
             GLES20.glUseProgram(program)
 
+            buildQuad(quadEnc, encW, encH, textureW, textureH, encRot)
+            vb.position(0)
+            vb.put(quadEnc)
             vb.position(0)
             GLES20.glEnableVertexAttribArray(aPos)
             GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 16, vb)
@@ -486,9 +495,6 @@ class PreviewRenderer(
             GLES20.glVertexAttribPointer(aUV, 2, GLES20.GL_FLOAT, false, 16, vb)
 
             GLES20.glUniformMatrix4fv(uSTMatrix, 1, false, textureTransform, 0)
-            GLES20.glUniform1f(uRot, displayRot)
-            GLES20.glUniform1i(uRaw, 0)
-            GLES20.glUniform1i(uFlip, if (flipMode) 1 else 0)
             GLES20.glUniform1i(uPeak, 0)      // monitoring overlays are preview-only
             GLES20.glUniform1i(uZebra, 0)
             GLES20.glUniform1i(uFalseColor, 0)
@@ -514,5 +520,9 @@ class PreviewRenderer(
         }
         EGL14.eglMakeCurrent(disp, drawSurf, drawSurf, eglCtx)
         GLES20.glViewport(0, 0, glSurfaceW, glSurfaceH)
+        // restore display quad in the shared buffer
+        vb.position(0)
+        vb.put(quadDisp)
+        vb.position(0)
     }
 }
