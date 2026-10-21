@@ -1,7 +1,5 @@
 package com.zugulu.cinecam
 import android.content.Context
-import android.graphics.Matrix as GMatrix
-import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.opengl.EGL14
 import android.opengl.EGLConfig
@@ -41,8 +39,6 @@ class PreviewRenderer(
     @Volatile var falseColorOn = false
     @Volatile var lutOn = false
     @Volatile var zebraLevel = 0.95f
-    @Volatile var displayRotation = 0   // Surface.ROTATION_0/90/180/270
-    @Volatile var sensorOrientation = 90
 
     /** Latest center-pixel average from the GL framebuffer (for diagnostics). */
     @Volatile var lastCenterRgb = intArrayOf(0, 0, 0)
@@ -84,42 +80,21 @@ class PreviewRenderer(
     @Volatile var textureW = 1920
     @Volatile var textureH = 1080
 
-    // AOSP Camera2Basic orientation math, verbatim: the buffer rect is TRANSPOSED
-    // (that transpose is the sensor's 90°), FILL-scaled, then rotated by the DISPLAY
-    // rotation only: -90°/+90° in landscape, 180° upside-down, identity in portrait.
-    // Mixing in totalRotation on top = double rotation (the diagonal/stretched bug).
-    private val quadDisp = FloatArray(16)
-    private val quadEnc = FloatArray(16)
-
-    private fun buildQuad(dst: FloatArray, viewW: Int, viewH: Int,
-                          texW: Int, texH: Int, deviceRot: Int) {
-        val viewRect = RectF(0f, 0f, viewW.toFloat(), viewH.toFloat())
-        val bufferRect = RectF(0f, 0f, texH.toFloat(), texW.toFloat())   // transposed!
-        val cx = viewRect.centerX()
-        val cy = viewRect.centerY()
-        val m = GMatrix()
-        if (deviceRot == Surface.ROTATION_90 || deviceRot == Surface.ROTATION_270) {
-            bufferRect.offset(cx - bufferRect.centerX(), cy - bufferRect.centerY())
-            m.setRectToRect(viewRect, bufferRect, GMatrix.ScaleToFit.FILL)
-            val scale = maxOf(viewH.toFloat() / texH, viewW.toFloat() / texW)
-            m.postScale(scale, scale, cx, cy)
-            m.postRotate(90f * (deviceRot - 2), cx, cy)
-        } else if (deviceRot == Surface.ROTATION_180) {
-            m.postRotate(180f, cx, cy)
-        }
-        val corners = floatArrayOf(
-            0f, 0f, viewW.toFloat(), 0f,
-            0f, viewH.toFloat(), viewW.toFloat(), viewH.toFloat())
-        m.mapPoints(corners)
-        for (i in 0 until 4) {
-            val px = corners[i * 2]
-            val py = corners[i * 2 + 1]
-            dst[i * 4] = px / (viewW / 2f) - 1f
-            dst[i * 4 + 1] = py / (viewH / 2f) - 1f
-            dst[i * 4 + 2] = px / texH
-            dst[i * 4 + 3] = py / texW
-        }
-    }
+    // STATIC quad: the GL view is a fixed 16:9 monitor — the camera content is
+    // ALWAYS upright inside it, whatever the phone orientation (no rotation math,
+    // no twisting possible). Edge-verified for a 90°-sensor landscape buffer:
+    //   texture u=0 (scene-up)  -> monitor top
+    //   texture u=1 (scene-down)-> monitor bottom
+    //   texture v=0 (scene-right)-> monitor right
+    //   texture v=1 (scene-left)-> monitor left
+    // Every texture edge maps to a monitor edge => no distortion, no mirror.
+    private val quadStatic = floatArrayOf(
+        //  x,   y,   u,   v
+        -1f, -1f, 1f, 1f,   // bottom-left : scene-down + scene-left
+         1f, -1f, 1f, 0f,   // bottom-right: scene-down + scene-right
+        -1f,  1f, 0f, 1f,   // top-left    : scene-up + scene-left
+         1f,  1f, 0f, 0f    // top-right   : scene-up + scene-right
+    )
 
     private val VERT = """
         uniform mat4 uSTMatrix;
@@ -332,10 +307,9 @@ class PreviewRenderer(
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)    // GL-rendering from pure-black dead GL
         GLES20.glUseProgram(program)
 
-        // AOSP orientation: rebuild the quad for the current view/size/rotation
-        buildQuad(quadDisp, glSurfaceW, glSurfaceH, textureW, textureH, displayRotation)
+        // static upright mapping (see quadStatic) — no rotation math at all
         vb.position(0)
-        vb.put(quadDisp)
+        vb.put(quadStatic)
         vb.position(0)
         GLES20.glEnableVertexAttribArray(aPos)
         GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 16, vb)
@@ -490,9 +464,8 @@ class PreviewRenderer(
             GLES20.glViewport(0, 0, encW, encH)
             GLES20.glUseProgram(program)
 
-            buildQuad(quadEnc, encW, encH, textureW, textureH, displayRotation)
             vb.position(0)
-            vb.put(quadEnc)
+            vb.put(quadStatic)
             vb.position(0)
             GLES20.glEnableVertexAttribArray(aPos)
             GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 16, vb)
@@ -526,9 +499,8 @@ class PreviewRenderer(
         }
         EGL14.eglMakeCurrent(disp, drawSurf, drawSurf, eglCtx)
         GLES20.glViewport(0, 0, glSurfaceW, glSurfaceH)
-        // restore display quad in the shared buffer
         vb.position(0)
-        vb.put(quadDisp)
+        vb.put(quadStatic)
         vb.position(0)
     }
 }

@@ -1002,8 +1002,6 @@ class MainActivity : Activity(), SensorEventListener {
             else -> 0
         }
         controller.deviceRotation = deg
-        renderer.displayRotation = rot
-        renderer.sensorOrientation = controller.capabilities?.sensorOrientation ?: 90
         val t = controller.totalRotation
         if (t != lastRotLog) {
             lastRotLog = t
